@@ -6,12 +6,20 @@ Rate::Rate(int hz) {
     lastUs = 0;
 }
 
+bool Rate::needsRun() {
+    unsigned long dt = micros() - lastUs;
+    if ( dt >= periodUs ) {
+        lastUs = micros();
+        return true;
+    }
+    return false;
+}
+
 void Rate::sleep() {
-    int dt = micros() - lastUs;
+    unsigned long dt = micros() - lastUs;
 
     if ( dt < periodUs )
         delayMicroseconds(periodUs-dt);
 
     lastUs = micros();
 }
-

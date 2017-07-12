@@ -18,4 +18,8 @@ public:
     void sendMessage(SendMsg data) {
         Serial.write((char*)&data, sizeof(SendMsg));
     }
+
+    bool hasMessage() {
+        return Serial.available() > 1;
+    }
 };

@@ -12,7 +12,7 @@ void leftEncoderISR() {
 }
 
 void rightEncoderISR() {
-    rightEncoder += digitalRead(RIGHT_ENC_B) ? 1 : -1;
+    rightEncoder += digitalRead(RIGHT_ENC_B) ? -1 : 1;
 }
 
 void frontEncoderISR() {
@@ -44,17 +44,17 @@ void initEncoders() {
 
 
 double getLeftEncoder() {
-    return leftEncoder;
+    return leftEncoder*TICKS2DISTANCE;
 }
 
 double getRightEncoder() {
-    return rightEncoder;
+    return rightEncoder*TICKS2DISTANCE;
 }
 
 double getFrontEncoder() {
-    return frontEncoder;
+    return frontEncoder*TICKS2DISTANCE;
 }
 
 double getBackEncoder() {
-    return backEncoder;
+    return backEncoder*TICKS2DISTANCE;
 }

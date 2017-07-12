@@ -1,57 +1,95 @@
 #include <Arduino.h>
 #include "ports.h"
+#include "motors.h"
 #include "encoders.h"
-
-#include <Servo.h>
-
-Servo s;
-
+#include "gyro.h"
 #include "Rate.h"
 #include "SerialPort.h"
+#include "Watchdog.h"
 
-struct Data {
-  int16_t number;
+struct RobotCommand {
+  float leftVelocity;
+  float rightVelocity;
+  float frontVelocity;
+  float backVelocity;
 };
 
-struct RobotState {
-  
-}
+struct RobotStatus {
+  float x;
+  float y;
+  float heading;
 
+  float vx;
+  float vy;
+  float vth;
+};
 
-void robotMain() {  
+struct out {
+	double val1;
+	double val2;
+};
 
-  SerialPort<int16_t, Data> p(9600);
+struct resp {
+	volatile char res[50];
+};
 
-  while ( 1 ) {
-    int16_t n = p.getMessage();
+void robotMain() {
+  pinMode(LOOPMONITOR, OUTPUT);
+  SerialPort<RobotCommand, RobotStatus> p(9600);
 
-    Data d;
+  initMotors();
+  initEncoders();
+  initGyro();
+  setMotors(0, 0, 0, 0);
 
-    d.number = n;
+  float lastDist = 0;
 
-    sprintf(d.text, "You sent: %d\n", n);
+  Watchdog watchdog(500);
 
-    p.sendMessage(d);
-  }
+  float dt = 1.0 / 100.0;
+  Rate r(100);
+  RobotStatus pose = { 0, 0, 0 };
 
-  /*
-  bool state = true;
-  Rate t(1000);
-  pinMode(17, OUTPUT);
-  while ( 1 ) {
-    
-    digitalWrite(17, HIGH);
-    delayMicroseconds(500);
-    digitalWrite(17, LOW);
-    
-    //Serial.print('w');
-    t.sleep();
-  }*/
-
-  /*initEncoders();
-  //s.attach(FRONT_PWM);
-  double us = 1.5 * 1000.0;
+  float lastHeading = 0;
+  pinMode(13, OUTPUT);
   while(1) {
-    //s.writeMicroseconds(500);
-  }*/
+    if ( r.needsRun() ) {
+      digitalWrite(LOOPMONITOR, HIGH);
+
+      float dist = (getLeftEncoder() + getRightEncoder()) / 2.0;
+      float deltaDist = dist-lastDist;
+      float heading = getHeading();
+      float headingRad = heading * (M_PI/180.0);
+
+      float dy = deltaDist * cos(headingRad);
+      float dx = deltaDist * sin(headingRad);
+      
+      pose.y += dy;
+      pose.x -= dx;
+      pose.heading = heading;
+
+      pose.vy = dy / dt;
+      pose.vx = dx / dt;
+      pose.vth = (heading - lastHeading) / dt;
+
+      lastHeading = heading;
+      lastDist = dist;
+
+      p.sendMessage(pose);
+      digitalWrite(LOOPMONITOR, LOW);
+    }
+
+    if ( p.hasMessage() ) {
+      RobotCommand command = p.getMessage();
+      setMotors(command.leftVelocity, command.rightVelocity, command.frontVelocity, command.backVelocity);
+      watchdog.feed();
+      digitalWrite(13, LOW);
+    }
+  
+    if ( watchdog.hungry() ) {
+      setMotors(0, 0, 0, 0);
+      digitalWrite(13, HIGH);
+    }
+
+  }
 }

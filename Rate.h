@@ -4,10 +4,11 @@
 class Rate {
 public:
     Rate(int hz);
+    bool needsRun();
     void sleep();
 private:
     int periodUs;
-    int lastUs;
+    unsigned long lastUs;
 };
 
 

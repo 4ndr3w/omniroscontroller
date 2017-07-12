@@ -18,5 +18,10 @@
 #define BACK_ENC 26
 #define BACK_ENC_B 30
 
+#define LOOPMONITOR 33
+
+#define TICKS2DISTANCE ((1.0/280.0)*0.0508*3.14)
+#define MAX_VELOCITY 0.4
+
 #endif
 
