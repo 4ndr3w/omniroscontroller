@@ -2,94 +2,128 @@
 #include "ports.h"
 #include "motors.h"
 #include "encoders.h"
-#include "gyro.h"
 #include "Rate.h"
-#include "SerialPort.h"
-#include "Watchdog.h"
+#include "SoftWatchdog.h"
+#include <Wire.h>
 
-struct RobotCommand {
-  float leftVelocity;
-  float rightVelocity;
-  float frontVelocity;
-  float backVelocity;
-};
+#include <ros.h>
+#include <sensor_msgs/Imu.h>
+#include <geometry_msgs/Twist.h>
+#include <omnibot_base/DriveSensors.h>
 
-struct RobotStatus {
-  float x;
-  float y;
-  float heading;
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
 
-  float vx;
-  float vy;
-  float vth;
-};
+SoftWatchdog motorKeepalive(500);
 
-struct out {
-	double val1;
-	double val2;
-};
+void handleDrivetrainUpdate(const geometry_msgs::Twist& velocity) {
+  double robotRadius = 0.1;
+  setMotors(
+      velocity.linear.x - (velocity.angular.z * robotRadius),
+      -velocity.linear.x - (velocity.angular.z * robotRadius),
+      -velocity.linear.y - (velocity.angular.z * robotRadius),
+      velocity.linear.y - (velocity.angular.z * robotRadius)
+  );
+  motorKeepalive.feed();
+  digitalWrite(13, LOW);
+}
 
-struct resp {
-	volatile char res[50];
-};
 
 void robotMain() {
+  Adafruit_BNO055 bno = Adafruit_BNO055();
+  {
+    bno.begin(Adafruit_BNO055::OPERATION_MODE_IMUPLUS);
+    uint8_t system, gyro, accel, mag;
+    while ( gyro < 3 )
+      bno.getCalibration(&system, &gyro, &accel, &mag);
+  }
+
   pinMode(LOOPMONITOR, OUTPUT);
-  SerialPort<RobotCommand, RobotStatus> p(9600);
 
   initMotors();
   initEncoders();
-  initGyro();
   setMotors(0, 0, 0, 0);
 
-  float lastDist = 0;
+  ros::NodeHandle nh;
+  nh.getHardware()->setBaud(256000);
+  nh.initNode();
 
-  Watchdog watchdog(500);
+  omnibot_base::DriveSensors sensors;
+  ros::Publisher sensorPub("/drivetrain/sensors", &sensors);
+  nh.advertise(sensorPub);
 
-  float dt = 1.0 / 100.0;
+  sensor_msgs::Imu imu;
+  ros::Publisher imuPub("/imu", &imu);
+  nh.advertise(imuPub);
+
+  ros::Subscriber<geometry_msgs::Twist> velocitySub("/cmd_vel", handleDrivetrainUpdate);
+  nh.subscribe(velocitySub);
+
   Rate r(100);
-  RobotStatus pose = { 0, 0, 0 };
 
-  float lastHeading = 0;
   pinMode(13, OUTPUT);
+
+  sensors.header.frame_id = "base_link";
+  imu.header.frame_id = "base_link";
+
+  float imuCov[] = 
+  {
+      1e-5, 0, 0,
+      0, 1e-5, 0,
+      0, 0, 1e-5 
+  };
+
+  for ( int i = 0; i < 9; i++ ) {
+    imu.orientation_covariance[i] = imuCov[i]; 
+    imu.angular_velocity_covariance[i] = imuCov[i]; 
+    imu.linear_acceleration_covariance[i] = imuCov[i];
+  }
+
   while(1) {
-    if ( r.needsRun() ) {
-      digitalWrite(LOOPMONITOR, HIGH);
+    digitalWrite(LOOPMONITOR, HIGH);
 
-      float dist = (getLeftEncoder() + getRightEncoder()) / 2.0;
-      float deltaDist = dist-lastDist;
-      float heading = getHeading();
-      float headingRad = heading * (M_PI/180.0);
+    sensors.header.stamp = nh.now();
+    sensors.left = getLeftEncoder();
+    sensors.right = getRightEncoder();
+    sensors.front = getFrontEncoder();
+    sensors.back = getBackEncoder();
 
-      float dy = deltaDist * cos(headingRad);
-      float dx = deltaDist * sin(headingRad);
-      
-      pose.y += dy;
-      pose.x -= dx;
-      pose.heading = heading;
+    imu.header.stamp = nh.now();
 
-      pose.vy = dy / dt;
-      pose.vx = dx / dt;
-      pose.vth = (heading - lastHeading) / dt;
+    imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+    sensors.heading = (2*M_PI) - (euler.x() * (M_PI/180.0));
 
-      lastHeading = heading;
-      lastDist = dist;
+    sensorPub.publish(&sensors);
 
-      p.sendMessage(pose);
-      digitalWrite(LOOPMONITOR, LOW);
-    }
 
-    if ( p.hasMessage() ) {
-      RobotCommand command = p.getMessage();
-      setMotors(command.leftVelocity, command.rightVelocity, command.frontVelocity, command.backVelocity);
-      watchdog.feed();
-      digitalWrite(13, LOW);
-    }
-  
-    if ( watchdog.hungry() ) {
+    imu::Quaternion imuQuat = bno.getQuat();
+    imu::Vector<3> linearAccel = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);
+    imu::Vector<3> angularVel = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+
+    imu.orientation.x = imuQuat.x();
+    imu.orientation.y = imuQuat.y();
+    imu.orientation.z = imuQuat.z();
+    imu.orientation.w = imuQuat.w();
+
+    imu.angular_velocity.x = angularVel.x();
+    imu.angular_velocity.y = angularVel.y();
+    imu.angular_velocity.z = angularVel.z();
+
+    imu.linear_acceleration.x = linearAccel.x();
+    imu.linear_acceleration.y = linearAccel.y();
+    imu.linear_acceleration.z = linearAccel.z();
+
+    imuPub.publish(&imu);
+
+    digitalWrite(LOOPMONITOR, LOW);
+
+    if ( motorKeepalive.hungry() ) {
       setMotors(0, 0, 0, 0);
       digitalWrite(13, HIGH);
     }
+    
+    nh.spinOnce();
+    r.sleep();
 
   }
 }

@@ -16,7 +16,7 @@ void rightEncoderISR() {
 }
 
 void frontEncoderISR() {
-    frontEncoder += digitalRead(FRONT_ENC_B) ? 1 : -1;
+    frontEncoder -= digitalRead(FRONT_ENC_B) ? 1 : -1;
 }
 
 void backEncoderISR() {

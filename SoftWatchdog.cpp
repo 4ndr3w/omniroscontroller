@@ -1,15 +1,15 @@
-#include "Watchdog.h"
+#include "SoftWatchdog.h"
 #include <Arduino.h>
 
-Watchdog::Watchdog(unsigned int maxAge) {
+SoftWatchdog::SoftWatchdog(unsigned int maxAge) {
     lastFed = 0;
     this->maxAge = maxAge;
 }
 
-void Watchdog::feed() {
+void SoftWatchdog::feed() {
     lastFed = millis();
 }
 
-bool Watchdog::hungry() {
+bool SoftWatchdog::hungry() {
     return millis() - lastFed >= maxAge;
 }
